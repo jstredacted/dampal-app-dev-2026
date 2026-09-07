@@ -5,10 +5,10 @@ Applications Development and Emerging Technologies.
 ## Branches
 
 - `main`: initial repository setup.
-- [`prelim-exam`](https://github.com/jstredacted/dampal-app-dev-2026/tree/prelim-exam): To-Do List Application for the preliminary examination, branched from `main`.
+- [`Prelim-Exam`](https://github.com/jstredacted/dampal-app-dev-2026/tree/Prelim-Exam): To-Do List Application for the preliminary examination, branched from `main`.
 
 ## Run the preliminary examination project
 
-Switch to `prelim-exam`, then open `index.html` in a browser with JavaScript
+Switch to `Prelim-Exam`, then open `index.html` in a browser with JavaScript
 and Local Storage enabled. Keep `index.html`, `styles.css`, and `script.js`
 in the same folder. No dependencies or build step are required.

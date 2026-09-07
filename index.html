@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>My To-Do List</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="styles.css">
+  <script src="script.js" defer></script>
+</head>
+<body>
+  <main class="workspace">
+    <header class="page-header">
+      <h1>To-Do List</h1>
+    </header>
+
+    <section class="notebook" aria-label="Task workspace">
+      <form id="task-form" novalidate>
+        <label for="task-input">New task</label>
+        <div class="input-row">
+          <input id="task-input" name="task" type="text"
+                 placeholder="Enter a task" autocomplete="off"
+                 aria-describedby="input-error" required>
+          <button id="add-button" type="submit">Add task</button>
+        </div>
+        <p id="input-error" class="error-message" role="alert"></p>
+      </form>
+
+      <section class="list-section" aria-labelledby="list-heading">
+        <div class="list-header">
+          <h2 id="list-heading">Your tasks</h2>
+          <p id="task-summary">0 tasks · 0 done</p>
+        </div>
+        <ul id="task-list"></ul>
+        <div id="empty-state" class="empty-state">
+          <p>No tasks yet.</p>
+        </div>
+      </section>
+
+      <footer class="list-footer">
+        <button id="delete-all-button" class="delete-all-button" type="button"
+                disabled>Delete all</button>
+      </footer>
+    </section>
+
+    <div class="feedback">
+      <p id="status-message" role="status" aria-live="polite"></p>
+      <p id="storage-error" class="error-message" role="alert"></p>
+    </div>
+    <noscript>Please enable JavaScript to add, complete, and save your tasks.</noscript>
+  </main>
+</body>
+</html>
