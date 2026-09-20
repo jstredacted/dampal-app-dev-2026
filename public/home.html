@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Home | User Authentication</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="page">
+    <header>
+      <p class="site-name">User Authentication</p>
+      <h1>Welcome home</h1>
+      <p>This is the homepage for the signup and login activity.</p>
+    </header>
+
+    <section class="home-content" aria-labelledby="home-heading">
+      <h2 id="home-heading">You're ready to go</h2>
+      <p>A successful signup or login brings you to this page.</p>
+      <p id="result" class="message" role="status"></p>
+      <a href="login.html">Back to login</a>
+    </section>
+  </main>
+  <script>
+    const result = document.getElementById("result");
+
+    if (window.location.hash === "#signup") {
+      result.textContent = "201 Created: Signup successful.";
+    } else if (window.location.hash === "#login") {
+      result.textContent = "200 OK: Login successful.";
+    }
+  </script>
+</body>
+</html>

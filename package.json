@@ -1,0 +1,23 @@
+{
+  "name": "dampal-rest-api-activity",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Simple signup and login using Express and an in-memory users array.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "check": "node --check server.js && node --check users.js && node --check public/auth.js && node --check test/api.test.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "npm@10.9.4",
+  "dependencies": {
+    "express": "5.2.1"
+  },
+  "devDependencies": {
+    "nodemon": "3.1.14"
+  }
+}

@@ -1,2 +1,5 @@
 .DS_Store
 .qa/
+node_modules/
+.env
+*.log
