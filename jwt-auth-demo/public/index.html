@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Log in</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 360px; margin: 3rem auto; padding: 0 1rem; }
+    h2 { margin-top: 2rem; }
+    input, textarea, button { display: block; width: 100%; padding: .6rem; margin-bottom: .6rem; box-sizing: border-box; font: inherit; }
+    label { display: block; margin-bottom: .3rem; }
+    textarea { resize: vertical; }
+    button { cursor: pointer; }
+    #message { min-height: 1.5rem; color: #b00020; }
+    #message.ok { color: #1b7f3b; }
+  </style>
+</head>
+<body>
+  <p id="message" role="status"></p>
+
+  <h2>Log in</h2>
+  <form id="login-form">
+    <label for="login-email">Email</label>
+    <input type="email" id="login-email" placeholder="Email" required />
+    <label for="login-password">Password</label>
+    <input type="password" id="login-password" placeholder="Password" required />
+    <button type="submit">Log in</button>
+  </form>
+
+  <h2>Create account</h2>
+  <form id="register-form">
+    <label for="reg-username">Username</label>
+    <input type="text" id="reg-username" placeholder="Username" required />
+    <label for="reg-email">Email</label>
+    <input type="email" id="reg-email" placeholder="Email" required />
+    <label for="reg-bio">Short bio (optional)</label>
+    <textarea id="reg-bio" placeholder="Short bio (optional)" rows="3"></textarea>
+    <label for="reg-password">Password (min 8 characters)</label>
+    <input type="password" id="reg-password" placeholder="Password (min 8 characters)" minlength="8" required />
+    <button type="submit">Create account</button>
+  </form>
+
+  <script>
+    const message = document.getElementById("message");
+
+    function show(text, ok = false) {
+      message.textContent = text;
+      message.className = ok ? "ok" : "";
+    }
+
+    async function post(url, body) {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      return { ok: res.ok, data: await res.json() };
+    }
+
+    document.getElementById("register-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      try {
+        const { ok, data } = await post("/api/auth/register", {
+          username: document.getElementById("reg-username").value,
+          email: document.getElementById("reg-email").value,
+          bio: document.getElementById("reg-bio").value,
+          password: document.getElementById("reg-password").value,
+        });
+        show(ok ? data.message : data.error, ok);
+      } catch {
+        show("Could not connect to the server. Please try again.");
+      }
+    });
+
+    document.getElementById("login-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      try {
+        const { ok, data } = await post("/api/auth/login", {
+          email: document.getElementById("login-email").value,
+          password: document.getElementById("login-password").value,
+        });
+        if (!ok) return show(data.error);
+
+        localStorage.setItem("token", data.token); // keep the "wristband"
+        window.location.href = "/dashboard.html";
+      } catch {
+        show("Could not connect to the server. Please try again.");
+      }
+    });
+  </script>
+</body>
+</html>

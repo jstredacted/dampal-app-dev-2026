@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Users</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 760px; margin: 3rem auto; padding: 0 1rem; }
+    a, button { padding: .6rem 1rem; font-size: 1rem; cursor: pointer; }
+    nav { display: flex; gap: .75rem; flex-wrap: wrap; margin: 1.5rem 0; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #bbb; padding: .65rem; text-align: left; vertical-align: top; }
+    th { background: #f1f1f1; }
+    td { overflow-wrap: anywhere; }
+    table { table-layout: fixed; }
+    #message { color: #b00020; }
+  </style>
+</head>
+<body>
+  <p id="message" role="status"></p>
+  <h1>Registered Users</h1>
+  <table>
+    <thead>
+      <tr><th>Username</th><th>Email</th><th>Bio</th></tr>
+    </thead>
+    <tbody id="users-body">
+      <tr><td colspan="3">Loading...</td></tr>
+    </tbody>
+  </table>
+  <nav aria-label="Protected pages">
+    <a href="/dashboard.html">Dashboard</a>
+    <a href="/about-me.html">About Me</a>
+    <button id="logout" type="button">Log out</button>
+  </nav>
+  <script>
+    const token = localStorage.getItem("token");
+    const message = document.getElementById("message");
+    const usersBody = document.getElementById("users-body");
+
+    function redirectToLogin() {
+      localStorage.removeItem("token");
+      window.location.href = "/index.html";
+    }
+
+    async function loadUsers() {
+      if (!token) return redirectToLogin();
+      try {
+        const response = await fetch("/api/users", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+
+        if (response.status === 401) return redirectToLogin();
+        if (!response.ok) {
+          message.textContent = "Could not load users. Please try again.";
+          return;
+        }
+
+        const users = await response.json();
+        usersBody.textContent = "";
+        for (const user of users) {
+          const row = document.createElement("tr");
+          for (const value of [user.username, user.email, user.bio || "No bio provided."]) {
+            const cell = document.createElement("td");
+            cell.textContent = value;
+            row.appendChild(cell);
+          }
+          usersBody.appendChild(row);
+        }
+        if (users.length === 0) message.textContent = "No users registered yet.";
+      } catch {
+        message.textContent = "Could not connect to the server. Please try again.";
+      }
+    }
+
+    document.getElementById("logout").addEventListener("click", () => {
+      localStorage.removeItem("token");
+      window.location.href = "/index.html";
+    });
+
+    loadUsers();
+  </script>
+</body>
+</html>
