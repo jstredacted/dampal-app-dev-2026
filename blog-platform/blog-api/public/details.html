@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ateneo Times | Blog Details</title>
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header>
+    <a class="site-title" href="/index.html">
+      <h1>Ateneo Times</h1>
+      <p>A satirical campus blog</p>
+    </a>
+    <nav aria-label="Main"></nav>
+    <p class="signed-in" id="signed-in"></p>
+  </header>
+
+  <main class="details">
+    <p id="message" role="status"></p>
+    <article id="post" hidden>
+      <h2 id="post-title"></h2>
+      <p class="meta" id="post-meta"></p>
+      <div class="content" id="post-content"></div>
+      <a class="button" id="edit" href="#" hidden>Edit</a>
+      <button class="button danger" id="delete" type="button" hidden>Delete</button>
+    </article>
+  </main>
+
+  <footer>Copyright &copy; Ateneo Times 2026</footer>
+
+  <script src="/app.js"></script>
+  <script>
+    const postId = new URLSearchParams(window.location.search).get("id");
+
+    async function loadPost() {
+      try {
+        const res = await fetch(`/api/posts/${postId}`); // public: no token needed
+        const data = await res.json();
+        if (!res.ok) return show(`${data.error} (${res.status})`);
+
+        document.title = `Ateneo Times | ${data.title}`;
+        document.getElementById("post-title").textContent = data.title;
+        document.getElementById("post-meta").textContent = `Post #${data.id} · author id ${data.user_id}`;
+        document.getElementById("post-content").textContent = data.content;
+
+        const user = currentUser();
+        const isOwner = user && data.user_id === user.id;
+        const isAdmin = user && user.role === "admin";
+        const edit = document.getElementById("edit");
+        edit.href = `/create.html?id=${data.id}`;
+        edit.hidden = !(isOwner || isAdmin);
+        document.getElementById("delete").hidden = !isAdmin;
+        document.getElementById("post").hidden = false;
+      } catch {
+        show("Could not connect to the Blog API.");
+      }
+    }
+
+    document.getElementById("delete").addEventListener("click", async () => {
+      if (!confirm("Delete this blog?")) return;
+      try {
+        const res = await authFetch(`/api/posts/${postId}`, { method: "DELETE" });
+        const data = await res.json();
+        if (!res.ok) return show(`${data.error} (${res.status})`);
+        window.location.href = "/index.html";
+      } catch {
+        show("Could not connect to the Blog API.");
+      }
+    });
+
+    renderNav("blogs");
+    loadPost();
+  </script>
+</body>
+</html>

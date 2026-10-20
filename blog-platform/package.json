@@ -1,0 +1,21 @@
+{
+  "name": "blog-platform",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Midterm exam: Auth Server and Blog API as two Express servers sharing one JWT_SECRET.",
+  "scripts": {
+    "start:auth": "node --experimental-webstorage --localstorage-file=data/auth-storage.db auth-server/server.js",
+    "start:blog": "node --experimental-webstorage --localstorage-file=data/blog-storage.db blog-api/server.js",
+    "check": "node --check auth-server/server.js && node --check auth-server/src/app.js && node --check auth-server/src/routes/auth.routes.js && node --check auth-server/src/controllers/auth.controller.js && node --check auth-server/src/middleware/errorHandler.js && node --check auth-server/src/middleware/cors.js && node --check auth-server/src/models/user.model.js && node --check auth-server/src/utils/password.js && node --check blog-api/server.js && node --check blog-api/src/app.js && node --check blog-api/src/routes/post.routes.js && node --check blog-api/src/controllers/post.controller.js && node --check blog-api/src/middleware/authenticate.js && node --check blog-api/src/middleware/authorize.js && node --check blog-api/src/middleware/errorHandler.js && node --check blog-api/src/models/post.model.js && node --check test/blog-platform.test.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=22.4.0"
+  },
+  "packageManager": "npm@10.9.4",
+  "dependencies": {
+    "dotenv": "^16.6.1",
+    "express": "^4.22.3",
+    "jsonwebtoken": "^9.0.3"
+  }
+}

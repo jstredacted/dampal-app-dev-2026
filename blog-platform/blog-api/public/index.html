@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ateneo Times | Home</title>
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header>
+    <a class="site-title" href="/index.html">
+      <h1>Ateneo Times</h1>
+      <p>A satirical campus blog</p>
+    </a>
+    <nav aria-label="Main"></nav>
+    <p class="signed-in" id="signed-in"></p>
+  </header>
+
+  <main>
+    <h2 id="list-title">All Blogs</h2>
+    <p id="message" role="status"></p>
+    <div class="blogs" id="blogs"></div>
+  </main>
+
+  <footer>Copyright &copy; Ateneo Times 2026</footer>
+
+  <script src="/app.js"></script>
+  <script>
+    // "My Blogs" uses this same page with ?mine=1 in the address
+    const showingMine = new URLSearchParams(window.location.search).get("mine") === "1";
+    const blogsBox = document.getElementById("blogs");
+
+    function snippet(text) {
+      return text.length > 120 ? `${text.slice(0, 120)}...` : text;
+    }
+
+    function renderBlogs(posts) {
+      blogsBox.textContent = "";
+      if (posts.length === 0) {
+        blogsBox.textContent = showingMine ? "You have no blogs yet." : "There are no blogs to display.";
+        return;
+      }
+      for (const post of posts) {
+        const link = document.createElement("a");
+        link.href = `/details.html?id=${post.id}`;
+        const title = document.createElement("h3");
+        title.textContent = post.title;
+        const text = document.createElement("p");
+        text.textContent = snippet(post.content);
+        link.append(title, text);
+        blogsBox.appendChild(link);
+      }
+    }
+
+    async function loadBlogs() {
+      try {
+        const res = showingMine
+          ? await authFetch("/api/me/posts")   // protected: any logged-in user
+          : await fetch("/api/posts");         // public: no token needed
+        const data = await res.json();
+        if (!res.ok) return show(`${data.error} (${res.status})`);
+        renderBlogs(data);
+      } catch {
+        show("Could not connect to the Blog API.");
+      }
+    }
+
+    if (showingMine && !currentUser()) {
+      window.location.href = "/login.html";
+    } else {
+      document.getElementById("list-title").textContent = showingMine ? "My Blogs" : "All Blogs";
+      renderNav(showingMine ? "mine" : "blogs");
+      loadBlogs();
+    }
+  </script>
+</body>
+</html>

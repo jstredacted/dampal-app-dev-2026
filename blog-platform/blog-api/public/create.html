@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ateneo Times | New Blog</title>
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header>
+    <a class="site-title" href="/index.html">
+      <h1>Ateneo Times</h1>
+      <p>A satirical campus blog</p>
+    </a>
+    <nav aria-label="Main"></nav>
+    <p class="signed-in" id="signed-in"></p>
+  </header>
+
+  <main>
+    <h2 id="form-title">Create a New Blog</h2>
+    <p id="message" role="status"></p>
+    <form id="blog-form" hidden>
+      <label for="title">Blog title</label>
+      <input type="text" id="title" required />
+      <label for="content">Blog body</label>
+      <textarea id="content" required></textarea>
+      <button class="button" id="save" type="submit">Submit</button>
+      <a class="button secondary" id="cancel" href="/index.html">Cancel</a>
+    </form>
+  </main>
+
+  <footer>Copyright &copy; Ateneo Times 2026</footer>
+
+  <script src="/app.js"></script>
+  <script>
+    // With ?id=3 in the address this page edits post 3; without it, it creates a new post
+    const editingId = new URLSearchParams(window.location.search).get("id");
+    const form = document.getElementById("blog-form");
+
+    async function loadPostForEditing() {
+      document.getElementById("form-title").textContent = "Edit Blog";
+      document.title = "Ateneo Times | Edit Blog";
+      document.getElementById("cancel").href = `/details.html?id=${editingId}`;
+      const res = await fetch(`/api/posts/${editingId}`);
+      const data = await res.json();
+      if (!res.ok) return show(`${data.error} (${res.status})`);
+      document.getElementById("title").value = data.title;
+      document.getElementById("content").value = data.content;
+      form.hidden = false;
+    }
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const body = JSON.stringify({
+        title: document.getElementById("title").value,
+        content: document.getElementById("content").value,
+      });
+      try {
+        const res = editingId
+          ? await authFetch(`/api/posts/${editingId}`, {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body,
+            })
+          : await authFetch("/api/posts", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body,
+            });
+        const data = await res.json();
+        if (!res.ok) return show(`${data.error} (${res.status})`);
+        window.location.href = `/details.html?id=${data.id}`;
+      } catch {
+        show("Could not connect to the Blog API.");
+      }
+    });
+
+    const user = currentUser();
+    renderNav("create");
+    if (!user) {
+      window.location.href = "/login.html";
+    } else if (!canWrite(user)) {
+      show("Only authors and admins can write blogs.");
+    } else if (editingId) {
+      loadPostForEditing().catch(() => show("Could not connect to the Blog API."));
+    } else {
+      form.hidden = false;
+    }
+  </script>
+</body>
+</html>

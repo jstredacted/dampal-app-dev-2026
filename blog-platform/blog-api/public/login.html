@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ateneo Times | Log In</title>
+  <link rel="icon" href="data:," />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header>
+    <a class="site-title" href="/index.html">
+      <h1>Ateneo Times</h1>
+      <p>A satirical campus blog</p>
+    </a>
+    <nav aria-label="Main"></nav>
+    <p class="signed-in" id="signed-in"></p>
+  </header>
+
+  <main>
+    <p id="message" role="status"></p>
+    <div class="columns">
+      <section>
+        <h2>Log In</h2>
+        <form id="login-form">
+          <label for="login-username">Username</label>
+          <input type="text" id="login-username" required />
+          <label for="login-password">Password</label>
+          <input type="password" id="login-password" required />
+          <button class="button" type="submit">Log In</button>
+        </form>
+      </section>
+
+      <section>
+        <h2>Create Account</h2>
+        <form id="register-form">
+          <label for="reg-username">Username</label>
+          <input type="text" id="reg-username" required />
+          <label for="reg-password">Password</label>
+          <input type="password" id="reg-password" required />
+          <label for="reg-role">Role</label>
+          <select id="reg-role">
+            <option value="reader">Reader</option>
+            <option value="author">Author</option>
+            <option value="admin">Admin</option>
+          </select>
+          <button class="button" type="submit">Create Account</button>
+        </form>
+      </section>
+    </div>
+  </main>
+
+  <footer>Copyright &copy; Ateneo Times 2026</footer>
+
+  <script src="/app.js"></script>
+  <script>
+    async function post(url, body) {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      return { ok: res.ok, status: res.status, data: await res.json() };
+    }
+
+    document.getElementById("register-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      try {
+        const { ok, status, data } = await post(`${AUTH_URL}/register`, {
+          username: document.getElementById("reg-username").value,
+          password: document.getElementById("reg-password").value,
+          role: document.getElementById("reg-role").value,
+        });
+        show(ok ? `${data.message} (${status})` : `${data.error} (${status})`, ok);
+        if (ok) e.target.reset();
+      } catch {
+        show("Could not connect to the Auth Server. Is it running on port 4000?");
+      }
+    });
+
+    document.getElementById("login-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      try {
+        const { ok, status, data } = await post(`${AUTH_URL}/login`, {
+          username: document.getElementById("login-username").value,
+          password: document.getElementById("login-password").value,
+        });
+        if (!ok) return show(`${data.error} (${status})`);
+
+        localStorage.setItem("accessToken", data.accessToken);   // used on the Blog API
+        localStorage.setItem("refreshToken", data.refreshToken); // used to get a new access token
+        window.location.href = "/index.html";
+      } catch {
+        show("Could not connect to the Auth Server. Is it running on port 4000?");
+      }
+    });
+
+    renderNav("login");
+  </script>
+</body>
+</html>

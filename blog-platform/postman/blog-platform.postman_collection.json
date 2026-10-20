@@ -1,0 +1,271 @@
+{
+  "info": {
+    "name": "Blog Platform (Midterm)",
+    "description": "Run the requests from top to bottom. Each login saves its tokens into collection variables. Start both servers first: npm run start:auth and npm run start:blog.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "authUrl", "value": "http://127.0.0.1:4000" },
+    { "key": "blogUrl", "value": "http://127.0.0.1:5000" },
+    { "key": "readerToken", "value": "" },
+    { "key": "authorToken", "value": "" },
+    { "key": "author2Token", "value": "" },
+    { "key": "adminToken", "value": "" },
+    { "key": "authorRefreshToken", "value": "" },
+    { "key": "postId", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "1. Auth Server",
+      "item": [
+        {
+          "name": "Register reader",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"username\": \"demo_reader\",\n  \"password\": \"reader-pass\",\n  \"role\": \"reader\"\n}" },
+            "url": "{{authUrl}}/register"
+          }
+        },
+        {
+          "name": "Register author",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"username\": \"demo_author\",\n  \"password\": \"author-pass\",\n  \"role\": \"author\"\n}" },
+            "url": "{{authUrl}}/register"
+          }
+        },
+        {
+          "name": "Register second author",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"username\": \"demo_author2\",\n  \"password\": \"author2-pass\",\n  \"role\": \"author\"\n}" },
+            "url": "{{authUrl}}/register"
+          }
+        },
+        {
+          "name": "Register admin",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"username\": \"demo_admin\",\n  \"password\": \"admin-pass\",\n  \"role\": \"admin\"\n}" },
+            "url": "{{authUrl}}/register"
+          }
+        },
+        {
+          "name": "Register with invalid role (400)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"username\": \"someone\",\n  \"password\": \"pass\",\n  \"role\": \"superuser\"\n}" },
+            "url": "{{authUrl}}/register"
+          }
+        },
+        {
+          "name": "Register taken username (409)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"username\": \"demo_author\",\n  \"password\": \"other-pass\",\n  \"role\": \"reader\"\n}" },
+            "url": "{{authUrl}}/register"
+          }
+        },
+        {
+          "name": "Login reader",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.collectionVariables.set('readerToken', pm.response.json().accessToken);"] } }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"username\": \"demo_reader\",\n  \"password\": \"reader-pass\"\n}" },
+            "url": "{{authUrl}}/login"
+          }
+        },
+        {
+          "name": "Login author",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const body = pm.response.json();", "pm.collectionVariables.set('authorToken', body.accessToken);", "pm.collectionVariables.set('authorRefreshToken', body.refreshToken);"] } }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"username\": \"demo_author\",\n  \"password\": \"author-pass\"\n}" },
+            "url": "{{authUrl}}/login"
+          }
+        },
+        {
+          "name": "Login second author",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.collectionVariables.set('author2Token', pm.response.json().accessToken);"] } }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"username\": \"demo_author2\",\n  \"password\": \"author2-pass\"\n}" },
+            "url": "{{authUrl}}/login"
+          }
+        },
+        {
+          "name": "Login admin",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.collectionVariables.set('adminToken', pm.response.json().accessToken);"] } }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"username\": \"demo_admin\",\n  \"password\": \"admin-pass\"\n}" },
+            "url": "{{authUrl}}/login"
+          }
+        },
+        {
+          "name": "Login wrong password (401)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"username\": \"demo_author\",\n  \"password\": \"wrong\"\n}" },
+            "url": "{{authUrl}}/login"
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. Blog API",
+      "item": [
+        {
+          "name": "List posts (public)",
+          "request": { "method": "GET", "url": "{{blogUrl}}/api/posts" }
+        },
+        {
+          "name": "Create post as author",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.collectionVariables.set('postId', pm.response.json().id);"] } }],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{authorToken}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"title\": \"My first post\",\n  \"content\": \"Hello from the author.\"\n}" },
+            "url": "{{blogUrl}}/api/posts"
+          }
+        },
+        {
+          "name": "Create post as reader (403)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{readerToken}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"title\": \"Not allowed\",\n  \"content\": \"Readers cannot post.\"\n}" },
+            "url": "{{blogUrl}}/api/posts"
+          }
+        },
+        {
+          "name": "Create post with no token (401)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"title\": \"No token\",\n  \"content\": \"Should fail.\"\n}" },
+            "url": "{{blogUrl}}/api/posts"
+          }
+        },
+        {
+          "name": "Create post with refresh token (401)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{authorRefreshToken}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"title\": \"Refresh token\",\n  \"content\": \"Should fail.\"\n}" },
+            "url": "{{blogUrl}}/api/posts"
+          }
+        },
+        {
+          "name": "View one post (public)",
+          "request": { "method": "GET", "url": "{{blogUrl}}/api/posts/{{postId}}" }
+        },
+        {
+          "name": "View missing post (404)",
+          "request": { "method": "GET", "url": "{{blogUrl}}/api/posts/9999" }
+        },
+        {
+          "name": "Update post as other author (403)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{author2Token}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"title\": \"Not my post\"\n}" },
+            "url": "{{blogUrl}}/api/posts/{{postId}}"
+          }
+        },
+        {
+          "name": "Update post as owner",
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{authorToken}}" }
+            ],
+            "body": { "mode": "raw", "raw": "{\n  \"title\": \"My edited post\"\n}" },
+            "url": "{{blogUrl}}/api/posts/{{postId}}"
+          }
+        },
+        {
+          "name": "My posts (author)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{authorToken}}" }],
+            "url": "{{blogUrl}}/api/me/posts"
+          }
+        },
+        {
+          "name": "Delete post as author (403)",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{authorToken}}" }],
+            "url": "{{blogUrl}}/api/posts/{{postId}}"
+          }
+        },
+        {
+          "name": "Delete post as admin",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }],
+            "url": "{{blogUrl}}/api/posts/{{postId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Refresh and logout",
+      "item": [
+        {
+          "name": "Refresh author access token",
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.collectionVariables.set('authorToken', pm.response.json().accessToken);"] } }],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"refreshToken\": \"{{authorRefreshToken}}\"\n}" },
+            "url": "{{authUrl}}/refresh"
+          }
+        },
+        {
+          "name": "Logout author",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"refreshToken\": \"{{authorRefreshToken}}\"\n}" },
+            "url": "{{authUrl}}/logout"
+          }
+        },
+        {
+          "name": "Refresh after logout (401)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"refreshToken\": \"{{authorRefreshToken}}\"\n}" },
+            "url": "{{authUrl}}/refresh"
+          }
+        }
+      ]
+    }
+  ]
+}

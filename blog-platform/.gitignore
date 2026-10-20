@@ -1,0 +1,7 @@
+node_modules/
+# Committed on purpose so a fresh clone runs with the same demo JWT_SECRET (academic demo only)
+!.env
+data/*
+!data/.gitkeep
+# The repository root ignores index.html; these frontend pages must be committed
+!blog-api/public/*.html

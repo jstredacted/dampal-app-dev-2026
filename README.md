@@ -7,6 +7,9 @@ Applications Development and Emerging Technologies.
 - `main`: initial repository setup.
 - [`Prelim-Exam`](https://github.com/jstredacted/dampal-app-dev-2026/tree/Prelim-Exam): To-Do List Application for the preliminary examination, branched from `main`.
 - `rest-api-activity`: User Signup and Login Authentication System.
+- `jwt-auth-routes`: JWT Auth Activity, in `jwt-auth-demo/`.
+- `midterm-exam`: Midterm Exam blog platform (two Express servers and a frontend), in `blog-platform/`.
+  See `blog-platform/README.md`.
 
 ## Run the REST API activity
 
