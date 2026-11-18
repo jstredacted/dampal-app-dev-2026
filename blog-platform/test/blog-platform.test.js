@@ -1,27 +1,36 @@
-// Starts the real Auth Server and Blog API as separate processes, each with its own
-// temporary localStorage file, so persistence and server independence are tested too.
+// Starts the real Auth Server and Blog Server as separate processes against a separate
+// MariaDB database (blog_platform_test), so your own blog_platform data is never touched.
+// Requires MySQL running in XAMPP.
 const assert = require("node:assert/strict");
-const { spawn, execFileSync } = require("node:child_process");
+const crypto = require("node:crypto");
+const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const net = require("node:net");
-const os = require("node:os");
 const path = require("node:path");
-const vm = require("node:vm");
 const { before, after, test } = require("node:test");
 const jwt = require("jsonwebtoken");
+const mysql = require("mysql2/promise");
 
 const ROOT = path.join(__dirname, "..");
-const PAGES = ["index.html", "details.html", "create.html", "login.html", "about.html"];
-const SECRET = "midterm-test-secret";
-const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "blog-platform-test-"));
-const authStorage = path.join(tempDir, "auth-storage.db");
-const blogStorage = path.join(tempDir, "blog-storage.db");
+require("dotenv").config({ path: path.join(ROOT, ".env"), quiet: true });
+
+const SECRET = "final-exam-test-secret";
+const TEST_DB = "blog_platform_test";
+const DB_ENV = {
+  DB_HOST: process.env.DB_HOST || "127.0.0.1",
+  DB_PORT: process.env.DB_PORT || "3306",
+  DB_USER: process.env.DB_USER || "root",
+  DB_PASSWORD: process.env.DB_PASSWORD || "",
+  DB_NAME: TEST_DB,
+};
 
 let authUrl;
 let blogUrl;
 let authProcess;
 let blogProcess;
+let db;
 const tokens = {};
+const ids = {};
 
 function freePort() {
   return new Promise((resolve) => {
@@ -33,21 +42,19 @@ function freePort() {
   });
 }
 
-function startServer(script, storageFile, portEnv) {
+function startServer(script, env) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [
-      "--experimental-webstorage",
-      `--localstorage-file=${storageFile}`,
-      script,
-    ], {
+    const child = spawn(process.execPath, [script], {
       cwd: ROOT,
-      env: { ...process.env, JWT_SECRET: SECRET, ...portEnv },
+      env: { ...process.env, ...DB_ENV, JWT_SECRET: SECRET, AUTH_RATE_LIMIT: "1000", ...env },
       stdio: ["ignore", "pipe", "pipe"],
     });
+    let errors = "";
+    child.stderr.on("data", (data) => { errors += data; });
     child.stdout.on("data", (data) => {
       if (data.toString().includes("running at")) resolve(child);
     });
-    child.on("exit", (code) => reject(new Error(`${script} exited with code ${code}`)));
+    child.on("exit", (code) => reject(new Error(`${script} exited with code ${code}: ${errors}`)));
   });
 }
 
@@ -61,33 +68,29 @@ function stopServer(child) {
   });
 }
 
-async function startAuth() {
-  const port = Number(new URL(authUrl).port);
-  authProcess = await startServer("auth-server/server.js", authStorage, {
-    AUTH_PORT: String(port),
-    BLOG_PORT: new URL(blogUrl).port, // the Auth Server allows CORS from the Blog API's pages
-  });
-}
+const startAuth = async () => {
+  authProcess = await startServer("auth-server/server.js", { AUTH_PORT: new URL(authUrl).port });
+};
+const startBlog = async () => {
+  blogProcess = await startServer("blog-server/server.js", { BLOG_PORT: new URL(blogUrl).port });
+};
 
-async function startBlog() {
-  const port = Number(new URL(blogUrl).port);
-  blogProcess = await startServer("blog-api/server.js", blogStorage, { BLOG_PORT: String(port) });
-}
-
-async function request(baseUrl, method, endpoint, { body, token, rawBody } = {}) {
+async function request(baseUrl, method, endpoint, { body, token, rawBody, cookie } = {}) {
   const headers = {};
   if (body !== undefined || rawBody !== undefined) headers["Content-Type"] = "application/json";
   if (token) headers.Authorization = `Bearer ${token}`;
+  if (cookie) headers.Cookie = cookie;
   const response = await fetch(`${baseUrl}${endpoint}`, {
     method,
     headers,
     body: rawBody !== undefined ? rawBody : body !== undefined ? JSON.stringify(body) : undefined,
   });
-  return { status: response.status, body: await response.json() };
+  return { status: response.status, headers: response.headers, body: await response.json() };
 }
 
 const auth = (method, endpoint, options) => request(authUrl, method, endpoint, options);
 const blog = (method, endpoint, options) => request(blogUrl, method, endpoint, options);
+const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 
 function assertError(response, status) {
   assert.equal(response.status, status);
@@ -95,7 +98,31 @@ function assertError(response, status) {
   assert.equal(typeof response.body.error, "string");
 }
 
+async function createTestDatabase() {
+  const connection = await mysql.createConnection({
+    host: DB_ENV.DB_HOST,
+    port: Number(DB_ENV.DB_PORT),
+    user: DB_ENV.DB_USER,
+    password: DB_ENV.DB_PASSWORD,
+    multipleStatements: true,
+  });
+  const schema = fs
+    .readFileSync(path.join(ROOT, "database", "schema.sql"), "utf8")
+    .replaceAll("blog_platform", TEST_DB);
+  await connection.query(`DROP DATABASE IF EXISTS ${TEST_DB}`);
+  await connection.query(schema);
+  await connection.end();
+}
+
 before(async () => {
+  await createTestDatabase();
+  db = mysql.createPool({
+    host: DB_ENV.DB_HOST,
+    port: Number(DB_ENV.DB_PORT),
+    user: DB_ENV.DB_USER,
+    password: DB_ENV.DB_PASSWORD,
+    database: TEST_DB,
+  });
   authUrl = `http://127.0.0.1:${await freePort()}`;
   blogUrl = `http://127.0.0.1:${await freePort()}`;
   await startAuth();
@@ -105,7 +132,17 @@ before(async () => {
 after(async () => {
   await stopServer(authProcess);
   await stopServer(blogProcess);
-  fs.rmSync(tempDir, { recursive: true, force: true });
+  if (db) {
+    await db.query(`DROP DATABASE IF EXISTS ${TEST_DB}`);
+    await db.end();
+  }
+});
+
+test("schema.sql creates the four tables and the three roles", async () => {
+  const [tables] = await db.query("SHOW TABLES");
+  assert.deepEqual(tables.map((row) => Object.values(row)[0]).sort(), ["posts", "refresh_tokens", "roles", "users"]);
+  const [roles] = await db.query("SELECT role FROM roles ORDER BY id");
+  assert.deepEqual(roles.map((r) => r.role), ["reader", "author", "admin"]);
 });
 
 test("register creates reader, author and admin accounts without returning the password", async () => {
@@ -114,36 +151,51 @@ test("register creates reader, author and admin accounts without returning the p
     ["arlo", "author"],
     ["bea", "author"],
     ["ada", "admin"],
+    ["ivy", "reader"],
   ]) {
     const response = await auth("POST", "/register", {
-      body: { username, password: `${username}-password`, role },
+      body: { email: `${username}@school.test`, username, password: `${username}-password`, role },
     });
     assert.equal(response.status, 201, username);
+    assert.deepEqual(Object.keys(response.body.user).sort(), ["email", "id", "role", "username"]);
     assert.equal(response.body.user.role, role);
-    assert.equal("hashed_password" in response.body.user, false);
-    assert.equal("password" in response.body.user, false);
+    ids[username] = response.body.user.id;
   }
+
+  const [rows] = await db.query(
+    "SELECT users.*, roles.role FROM users JOIN roles ON roles.id = users.role_id WHERE username = 'arlo'"
+  );
+  assert.equal(rows[0].role, "author");
+  assert.equal(rows[0].email, "arlo@school.test");
+  assert.equal(rows[0].is_active, 1);
+  assert.match(rows[0].password_hash, /^[0-9a-f]{32}:[0-9a-f]{128}$/);
+  assert.doesNotMatch(rows[0].password_hash, /password/);
 });
 
-test("register returns 400 for missing fields or an invalid role, 409 for a taken username", async () => {
+test("register returns 400 for missing fields, a bad email or an invalid role, 409 when taken", async () => {
   for (const body of [
     {},
-    { password: "pw", role: "reader" },
-    { username: "x", role: "reader" },
-    { username: "x", password: "pw" },
-    { username: "  ", password: "pw", role: "reader" },
-    { username: 5, password: "pw", role: "reader" },
-    { username: "x", password: "pw", role: "superuser" },
+    { username: "x", password: "pw", role: "reader" },
+    { email: "x@school.test", password: "pw", role: "reader" },
+    { email: "x@school.test", username: "x", role: "reader" },
+    { email: "x@school.test", username: "x", password: "pw" },
+    { email: "x@school.test", username: "  ", password: "pw", role: "reader" },
+    { email: "x@school.test", username: 5, password: "pw", role: "reader" },
+    { email: "not-an-email", username: "x", password: "pw", role: "reader" },
+    { email: "x@school.test", username: "x", password: "pw", role: "superuser" },
   ]) {
     assertError(await auth("POST", "/register", { body }), 400);
   }
   assertError(await auth("POST", "/register", {
-    body: { username: " arlo ", password: "another", role: "reader" },
+    body: { email: "new@school.test", username: " arlo ", password: "another", role: "reader" },
+  }), 409);
+  assertError(await auth("POST", "/register", {
+    body: { email: "ARLO@school.test", username: "arlo2", password: "another", role: "reader" },
   }), 409);
 });
 
 test("login returns access and refresh tokens with the required claims and lifetimes", async () => {
-  for (const username of ["rina", "arlo", "bea", "ada"]) {
+  for (const username of ["rina", "arlo", "bea", "ada", "ivy"]) {
     const response = await auth("POST", "/login", {
       body: { username, password: `${username}-password` },
     });
@@ -153,47 +205,82 @@ test("login returns access and refresh tokens with the required claims and lifet
   }
 
   const access = jwt.verify(tokens.arlo.accessToken, SECRET);
+  assert.equal(access.id, ids.arlo);
   assert.equal(access.username, "arlo");
   assert.equal(access.role, "author");
-  assert.equal(typeof access.id, "number");
   assert.equal(access.type, undefined);
   assert.equal(access.exp - access.iat, 15 * 60);
 
   const refresh = jwt.verify(tokens.arlo.refreshToken, SECRET);
   assert.equal(refresh.type, "refresh");
-  assert.equal(refresh.id, access.id);
+  assert.equal(refresh.id, ids.arlo);
   assert.equal(refresh.exp - refresh.iat, 7 * 24 * 60 * 60);
 });
 
-test("login returns 400 for missing fields and 401 for wrong credentials", async () => {
+test("login stores only a hash of the refresh token, valid for 7 days, in refresh_tokens", async () => {
+  const [rows] = await db.query(
+    `SELECT token_hash, revoked_at, TIMESTAMPDIFF(HOUR, NOW(), expires_at) AS hours_left
+     FROM refresh_tokens WHERE user_id = ?`,
+    [ids.arlo]
+  );
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].token_hash, sha256(tokens.arlo.refreshToken));
+  assert.equal(rows[0].revoked_at, null);
+  assert.ok(rows[0].hours_left >= 7 * 24 - 1 && rows[0].hours_left <= 7 * 24);
+
+  const [raw] = await db.query("SELECT COUNT(*) AS n FROM refresh_tokens WHERE token_hash = ?", [tokens.arlo.refreshToken]);
+  assert.equal(raw[0].n, 0);
+});
+
+test("login also sets the refresh token as an httpOnly cookie", async () => {
+  const response = await auth("POST", "/login", { body: { username: "bea", password: "bea-password" } });
+  const cookie = response.headers.get("set-cookie");
+  assert.match(cookie, new RegExp(`^refreshToken=${response.body.refreshToken};`));
+  assert.match(cookie, /HttpOnly/);
+  assert.match(cookie, /SameSite=Strict/);
+  tokens.bea = response.body;
+});
+
+test("login returns 400 for missing fields and 401 for wrong credentials or a disabled account", async () => {
   assertError(await auth("POST", "/login", { body: { username: "arlo" } }), 400);
   assertError(await auth("POST", "/login", { body: { password: "x" } }), 400);
   assertError(await auth("POST", "/login", { body: { username: "arlo", password: "wrong" } }), 401);
   assertError(await auth("POST", "/login", { body: { username: "nobody", password: "x" } }), 401);
+
+  await db.query("UPDATE users SET is_active = 0 WHERE id = ?", [ids.ivy]);
+  assertError(await auth("POST", "/login", { body: { username: "ivy", password: "ivy-password" } }), 401);
+  assertError(await auth("POST", "/refresh", { body: { refreshToken: tokens.ivy.refreshToken } }), 401);
 });
 
-test("refresh returns only a new access token for the saved refresh token", async () => {
+test("refresh returns only a new access token, from the body or the cookie", async () => {
   const response = await auth("POST", "/refresh", { body: { refreshToken: tokens.arlo.refreshToken } });
   assert.equal(response.status, 200);
   assert.deepEqual(Object.keys(response.body), ["accessToken"]);
   assert.equal(jwt.verify(response.body.accessToken, SECRET).role, "author");
+
+  const fromCookie = await auth("POST", "/refresh", { cookie: `refreshToken=${tokens.arlo.refreshToken}` });
+  assert.equal(fromCookie.status, 200);
+  assert.deepEqual(Object.keys(fromCookie.body), ["accessToken"]);
 });
 
-test("refresh returns 400 when missing and 401 for forged, expired, or access tokens", async () => {
+test("refresh returns 400 when missing and 401 for forged, expired, unknown or access tokens", async () => {
   assertError(await auth("POST", "/refresh", { body: {} }), 400);
-  const forged = jwt.sign({ id: 2, type: "refresh" }, "wrong-secret", { expiresIn: "7d" });
-  const expired = jwt.sign({ id: 2, type: "refresh", exp: Math.floor(Date.now() / 1000) - 1 }, SECRET);
-  for (const refreshToken of [forged, expired, tokens.arlo.accessToken, "not-a-jwt"]) {
+  assertError(await auth("POST", "/refresh"), 400);
+  const forged = jwt.sign({ id: ids.arlo, type: "refresh" }, "wrong-secret", { expiresIn: "7d" });
+  const expired = jwt.sign({ id: ids.arlo, type: "refresh", exp: Math.floor(Date.now() / 1000) - 1 }, SECRET);
+  const neverSaved = jwt.sign({ id: ids.arlo, type: "refresh" }, SECRET, { expiresIn: "7d", jwtid: "x" });
+  for (const refreshToken of [forged, expired, neverSaved, tokens.arlo.accessToken, "not-a-jwt"]) {
     assertError(await auth("POST", "/refresh", { body: { refreshToken } }), 401);
   }
 });
 
-test("a valid refresh token that is no longer the saved one is rejected", async () => {
-  const first = tokens.bea.refreshToken;
-  const second = await auth("POST", "/login", { body: { username: "bea", password: "bea-password" } });
-  assert.notEqual(second.body.refreshToken, first);
-  assertError(await auth("POST", "/refresh", { body: { refreshToken: first } }), 401);
-  tokens.bea = second.body;
+test("refresh returns 401 when the saved row has passed expires_at", async () => {
+  const login = await auth("POST", "/login", { body: { username: "rina", password: "rina-password" } });
+  await db.query(
+    "UPDATE refresh_tokens SET expires_at = DATE_SUB(NOW(), INTERVAL 1 MINUTE) WHERE token_hash = ?",
+    [sha256(login.body.refreshToken)]
+  );
+  assertError(await auth("POST", "/refresh", { body: { refreshToken: login.body.refreshToken } }), 401);
 });
 
 test("anyone can list posts and view one post without a token", async () => {
@@ -209,9 +296,9 @@ test("creating a post requires an author or admin access token", async () => {
   assertError(await blog("POST", "/api/posts", { body }), 401);
   assertError(await blog("POST", "/api/posts", { body, token: tokens.arlo.refreshToken }), 401);
   assertError(await blog("POST", "/api/posts", { body, token: "broken" }), 401);
-  const forged = jwt.sign({ id: 2, username: "arlo", role: "admin" }, "wrong-secret");
+  const forged = jwt.sign({ id: ids.arlo, username: "arlo", role: "admin" }, "wrong-secret");
   assertError(await blog("POST", "/api/posts", { body, token: forged }), 401);
-  const expired = jwt.sign({ id: 2, username: "arlo", role: "author", exp: Math.floor(Date.now() / 1000) - 1 }, SECRET);
+  const expired = jwt.sign({ id: ids.arlo, username: "arlo", role: "author", exp: Math.floor(Date.now() / 1000) - 1 }, SECRET);
   assertError(await blog("POST", "/api/posts", { body, token: expired }), 401);
   assertError(await blog("POST", "/api/posts", { body, token: tokens.rina.accessToken }), 403);
 });
@@ -223,18 +310,25 @@ test("Authorization headers that are not exactly 'Bearer <token>' are rejected",
   }
 });
 
-test("create validates title and content and takes user_id from the token", async () => {
+test("create validates title and content and takes author_id from the token", async () => {
   for (const body of [{}, { title: "Only title" }, { title: " ", content: "x" }, { title: 1, content: "x" }]) {
     assertError(await blog("POST", "/api/posts", { body, token: tokens.arlo.accessToken }), 400);
   }
 
-  const arloId = jwt.decode(tokens.arlo.accessToken).id;
   const created = await blog("POST", "/api/posts", {
-    body: { title: "Arlo's post", content: "Written by Arlo", user_id: 999 },
+    body: { title: "Arlo's post", content: "Written by Arlo", author_id: ids.ada },
     token: tokens.arlo.accessToken,
   });
   assert.equal(created.status, 201);
-  assert.deepEqual(created.body, { id: 1, user_id: arloId, title: "Arlo's post", content: "Written by Arlo" });
+  assert.equal(created.body.id, 1);
+  assert.equal(created.body.author_id, ids.arlo);
+  assert.equal(created.body.author, "arlo");
+  assert.equal(created.body.title, "Arlo's post");
+  assert.equal(created.body.content, "Written by Arlo");
+  assert.ok(created.body.created_at && created.body.updated_at);
+
+  const [rows] = await db.query("SELECT author_id FROM posts WHERE id = 1");
+  assert.equal(rows[0].author_id, ids.arlo);
 
   const adminPost = await blog("POST", "/api/posts", {
     body: { title: "Admin note", content: "From the admin" },
@@ -257,14 +351,14 @@ test("only the post owner or an admin can update, and only the given fields chan
   assertError(await blog("PUT", "/api/posts/1", { body: { title: "" }, token: tokens.arlo.accessToken }), 400);
 
   const titleOnly = await blog("PUT", "/api/posts/1", {
-    body: { title: "Edited title", user_id: 999, id: 50 },
+    body: { title: "Edited title", author_id: ids.ada, id: 50 },
     token: tokens.arlo.accessToken,
   });
   assert.equal(titleOnly.status, 200);
   assert.equal(titleOnly.body.title, "Edited title");
   assert.equal(titleOnly.body.content, "Written by Arlo");
   assert.equal(titleOnly.body.id, 1);
-  assert.equal(titleOnly.body.user_id, jwt.decode(tokens.arlo.accessToken).id);
+  assert.equal(titleOnly.body.author_id, ids.arlo);
 
   const byAdmin = await blog("PUT", "/api/posts/1", {
     body: { content: "Edited by admin" },
@@ -273,6 +367,7 @@ test("only the post owner or an admin can update, and only the given fields chan
   assert.equal(byAdmin.status, 200);
   assert.equal(byAdmin.body.title, "Edited title");
   assert.equal(byAdmin.body.content, "Edited by admin");
+  assert.equal(byAdmin.body.author_id, ids.arlo);
 });
 
 test("GET /api/me/posts lists only the logged-in user's posts", async () => {
@@ -292,18 +387,30 @@ test("only an admin can delete, even when an author owns the post", async () => 
   const deleted = await blog("DELETE", "/api/posts/1", { token: tokens.ada.accessToken });
   assert.equal(deleted.status, 200);
   assertError(await blog("GET", "/api/posts/1"), 404);
+  const [rows] = await db.query("SELECT COUNT(*) AS n FROM posts WHERE id = 1");
+  assert.equal(rows[0].n, 0);
 });
 
-test("logout clears the refresh token so it can no longer be used", async () => {
+test("logout sets revoked_at so the refresh token can no longer be used", async () => {
   assertError(await auth("POST", "/logout", { body: {} }), 400);
 
   const loggedOut = await auth("POST", "/logout", { body: { refreshToken: tokens.rina.refreshToken } });
   assert.equal(loggedOut.status, 200);
+  const [rows] = await db.query("SELECT revoked_at FROM refresh_tokens WHERE token_hash = ?", [sha256(tokens.rina.refreshToken)]);
+  assert.ok(rows[0].revoked_at instanceof Date);
   assertError(await auth("POST", "/refresh", { body: { refreshToken: tokens.rina.refreshToken } }), 401);
 
   // Logging out twice still succeeds and does not affect anyone else
   assert.equal((await auth("POST", "/logout", { body: { refreshToken: tokens.rina.refreshToken } })).status, 200);
   assert.equal((await auth("POST", "/refresh", { body: { refreshToken: tokens.arlo.refreshToken } })).status, 200);
+});
+
+test("logout with the cookie revokes it and clears the cookie", async () => {
+  const login = await auth("POST", "/login", { body: { username: "rina", password: "rina-password" } });
+  const response = await auth("POST", "/logout", { cookie: `refreshToken=${login.body.refreshToken}` });
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("set-cookie"), /^refreshToken=;.*Expires=Thu, 01 Jan 1970/);
+  assertError(await auth("POST", "/refresh", { body: { refreshToken: login.body.refreshToken } }), 401);
 });
 
 test("malformed JSON and unknown routes also use the { error } format", async () => {
@@ -313,126 +420,55 @@ test("malformed JSON and unknown routes also use the { error } format", async ()
   assertError(await blog("GET", "/nowhere"), 404);
 });
 
-test("the Blog API serves the frontend pages but not its source or configuration", async () => {
-  for (const page of PAGES.map((file) => `/${file}`).concat("/")) {
-    const response = await fetch(`${blogUrl}${page}`);
-    assert.equal(response.status, 200, page);
-    assert.match(await response.text(), /<!DOCTYPE html>/i);
-  }
-  for (const asset of ["/app.js", "/styles.css"]) {
-    assert.equal((await fetch(`${blogUrl}${asset}`)).status, 200, asset);
-  }
-  for (const file of ["/server.js", "/src/app.js", "/.env", "/../.env", "/package.json"]) {
-    const response = await fetch(`${blogUrl}${file}`);
-    assert.equal(response.status, 404, file);
+test("helmet sets security headers on both servers", async () => {
+  for (const url of [`${authUrl}/nowhere`, `${blogUrl}/api/posts`]) {
+    const response = await fetch(url);
+    assert.equal(response.headers.get("x-content-type-options"), "nosniff", url);
+    assert.equal(response.headers.get("x-powered-by"), null, url);
   }
 });
 
-test("frontend page scripts have valid JavaScript syntax", () => {
-  const publicDir = path.join(ROOT, "blog-api", "public");
-  const shared = fs.readFileSync(path.join(publicDir, "app.js"), "utf8");
-  assert.doesNotThrow(() => new vm.Script(shared, { filename: "app.js" }));
-  for (const file of PAGES) {
-    const html = fs.readFileSync(path.join(publicDir, file), "utf8");
-    assert.match(html, /<script src="\/app.js"><\/script>/, file);
-    assert.match(html, /<link rel="stylesheet" href="\/styles.css"/, file);
-    const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)];
-    assert.equal(scripts.length, 1, file);
-    // Pages share one global scope with app.js, so check them together
-    assert.doesNotThrow(() => new vm.Script(`${shared}\n${scripts[0][1]}`, { filename: file }));
+test("the Blog Server does not serve its source or configuration files", async () => {
+  for (const file of ["/server.js", "/db.js", "/src/app.js", "/.env", "/../.env", "/package.json"]) {
+    assert.equal((await fetch(`${blogUrl}${file}`)).status, 404, file);
   }
 });
 
-test("the Auth Server allows CORS only from the Blog API's page address", async () => {
-  const pageOrigin = blogUrl;
-  const preflight = await fetch(`${authUrl}/login`, {
-    method: "OPTIONS",
-    headers: {
-      Origin: pageOrigin,
-      "Access-Control-Request-Method": "POST",
-      "Access-Control-Request-Headers": "content-type",
-    },
-  });
-  assert.equal(preflight.status, 204);
-  assert.equal(preflight.headers.get("access-control-allow-origin"), pageOrigin);
-  assert.match(preflight.headers.get("access-control-allow-headers"), /Content-Type/i);
-
-  const login = await fetch(`${authUrl}/login`, {
-    method: "POST",
-    headers: { Origin: pageOrigin, "Content-Type": "application/json" },
-    body: JSON.stringify({ username: "arlo", password: "wrong" }),
-  });
-  assert.equal(login.status, 401);
-  assert.equal(login.headers.get("access-control-allow-origin"), pageOrigin);
-
-  const other = await fetch(`${authUrl}/login`, {
-    method: "OPTIONS",
-    headers: { Origin: "http://evil.example", "Access-Control-Request-Method": "POST" },
-  });
-  assert.equal(other.headers.get("access-control-allow-origin"), null);
+test("express-rate-limit returns 429 after too many Auth Server requests", async () => {
+  const port = await freePort();
+  const limited = await startServer("auth-server/server.js", { AUTH_PORT: String(port), AUTH_RATE_LIMIT: "3" });
+  try {
+    const url = `http://127.0.0.1:${port}`;
+    for (let i = 0; i < 3; i++) {
+      assert.equal((await request(url, "POST", "/login", { body: {} })).status, 400);
+    }
+    assertError(await request(url, "POST", "/login", { body: {} }), 429);
+  } finally {
+    await stopServer(limited);
+  }
 });
 
-test("the Blog API keeps working with an access token while the Auth Server is stopped", async () => {
+test("the Blog Server keeps working with an access token while the Auth Server is stopped", async () => {
   await stopServer(authProcess);
   const created = await blog("POST", "/api/posts", {
     body: { title: "Auth is down", content: "Still works" },
     token: tokens.bea.accessToken,
   });
   assert.equal(created.status, 201);
-  assert.equal(created.body.id, 3); // id 1 was deleted, but ids are never reused
+  assert.equal(created.body.id, 3); // id 1 was deleted, but AUTO_INCREMENT never reuses ids
 });
 
-test("users, posts, refresh tokens and revocation survive a restart of both servers", async () => {
+test("users, posts and refresh tokens survive a restart of both servers", async () => {
   await stopServer(blogProcess);
   await startAuth();
   await startBlog();
 
   const posts = await blog("GET", "/api/posts");
-  assert.deepEqual(posts.body.map((p) => p.id), [2, 3]);
+  assert.deepEqual(posts.body.map((p) => p.id).sort(), [2, 3]);
 
-  // Saved refresh token still works; the logged-out one stays revoked
   assert.equal((await auth("POST", "/refresh", { body: { refreshToken: tokens.arlo.refreshToken } })).status, 200);
   assertError(await auth("POST", "/refresh", { body: { refreshToken: tokens.rina.refreshToken } }), 401);
   assertError(await auth("POST", "/register", {
-    body: { username: "arlo", password: "x", role: "reader" },
+    body: { email: "other@school.test", username: "arlo", password: "x", role: "reader" },
   }), 409);
-
-  const created = await blog("POST", "/api/posts", {
-    body: { title: "After restart", content: "New id" },
-    token: tokens.ada.accessToken,
-  });
-  assert.equal(created.body.id, 4);
-
-  // Logging in again sets a new refresh token and clears revoked_at
-  const relogin = await auth("POST", "/login", { body: { username: "rina", password: "rina-password" } });
-  assert.equal(relogin.status, 200);
-  assert.equal((await auth("POST", "/refresh", { body: { refreshToken: relogin.body.refreshToken } })).status, 200);
-  tokens.rina = relogin.body;
-  await auth("POST", "/logout", { body: { refreshToken: tokens.arlo.refreshToken } });
-});
-
-test("saved users follow the required schema with hashed passwords", async () => {
-  await stopServer(authProcess);
-  const saved = execFileSync(process.execPath, [
-    "--experimental-webstorage",
-    "--no-warnings",
-    `--localstorage-file=${authStorage}`,
-    "-e",
-    "process.stdout.write(localStorage.getItem('users'))",
-  ]).toString();
-  const users = JSON.parse(saved);
-  assert.equal(users.length, 4);
-  for (const user of users) {
-    assert.deepEqual(Object.keys(user).sort(), [
-      "created_at", "hashed_password", "id", "refresh_token", "revoked_at", "role", "username",
-    ]);
-    assert.doesNotMatch(user.hashed_password, /password/);
-    assert.match(user.hashed_password, /^[0-9a-f]{32}:[0-9a-f]{128}$/);
-  }
-  const rina = users.find((u) => u.username === "rina");
-  assert.equal(rina.refresh_token, tokens.rina.refreshToken);
-  assert.equal(rina.revoked_at, null);
-  const arlo = users.find((u) => u.username === "arlo");
-  assert.equal(arlo.refresh_token, null);
-  assert.equal(typeof arlo.revoked_at, "string");
 });

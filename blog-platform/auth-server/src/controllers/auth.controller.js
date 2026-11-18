@@ -1,15 +1,24 @@
 const crypto = require("crypto");
 const jwt = require("jsonwebtoken");
-const User = require("../models/user.model");
+const db = require("../../db");
 const { hashPassword, verifyPassword } = require("../utils/password");
 
 const ROLES = ["reader", "author", "admin"];
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const REFRESH_COOKIE = "refreshToken";
+const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
 function isMissing(value) {
   return typeof value !== "string" || value.trim() === "";
 }
 
-// Access token: { id, username, role }, used on the Blog API for 15 minutes
+// Only a SHA-256 hash of the refresh token is saved (token_hash CHAR(64)),
+// so a leaked database does not leak usable tokens
+function hashToken(token) {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
+
+// Access token: { id, username, role }, used on the Blog Server for 15 minutes
 function signAccessToken(user) {
   return jwt.sign(
     { id: user.id, username: user.username, role: user.role },
@@ -18,7 +27,7 @@ function signAccessToken(user) {
   );
 }
 
-// Refresh token: same secret, marked type "refresh" so the Blog API rejects it.
+// Refresh token: same secret, marked type "refresh" so the Blog Server rejects it.
 // jwtid makes every login's token unique, even two logins in the same second.
 function signRefreshToken(user) {
   return jwt.sign(
@@ -28,36 +37,65 @@ function signRefreshToken(user) {
   );
 }
 
-exports.register = (req, res, next) => {
-  try {
-    const { username, password, role } = req.body || {};
+// Postman sends the refresh token in the body; the React app sends it as an httpOnly cookie
+function readRefreshToken(req) {
+  const fromBody = req.body && req.body.refreshToken;
+  if (fromBody !== undefined) return fromBody;
+  return req.cookies && req.cookies[REFRESH_COOKIE];
+}
 
-    if (isMissing(username) || isMissing(password) || isMissing(role)) {
-      return res.status(400).json({ error: "Username, password and role are required" });
+exports.register = async (req, res, next) => {
+  try {
+    const { email, username, password, role } = req.body || {};
+
+    if (isMissing(email) || isMissing(username) || isMissing(password) || isMissing(role)) {
+      return res.status(400).json({ error: "Email, username, password and role are required" });
+    }
+    if (!EMAIL_PATTERN.test(email.trim())) {
+      return res.status(400).json({ error: "Email must be a valid email address" });
     }
     if (!ROLES.includes(role)) {
       return res.status(400).json({ error: "Role must be reader, author or admin" });
     }
-    if (User.findByUsername(username.trim())) {
+
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanUsername = username.trim();
+
+    const [taken] = await db.query(
+      "SELECT username, email FROM users WHERE username = ? OR email = ?",
+      [cleanUsername, cleanEmail]
+    );
+    if (taken.some((u) => u.username === cleanUsername)) {
       return res.status(409).json({ error: "Username is already taken" });
     }
+    if (taken.length > 0) {
+      return res.status(409).json({ error: "Email is already registered" });
+    }
 
-    const user = User.create({
-      username: username.trim(),
-      hashed_password: hashPassword(password), // never store plain passwords
-      role,
-    });
+    const [roleRows] = await db.query("SELECT id FROM roles WHERE role = ?", [role]);
+    if (roleRows.length === 0) {
+      return res.status(500).json({ error: "Roles are missing. Run npm run db:setup" });
+    }
+
+    const [result] = await db.query(
+      "INSERT INTO users (email, username, password_hash, role_id) VALUES (?, ?, ?, ?)",
+      [cleanEmail, cleanUsername, hashPassword(password), roleRows[0].id] // never store plain passwords
+    );
 
     res.status(201).json({
       message: "Account created. You can log in now.",
-      user: { id: user.id, username: user.username, role: user.role },
+      user: { id: result.insertId, email: cleanEmail, username: cleanUsername, role },
     });
   } catch (err) {
+    // Two sign-ups at the same moment: the UNIQUE constraint catches what the SELECT missed
+    if (err.code === "ER_DUP_ENTRY") {
+      return res.status(409).json({ error: "Username or email is already taken" });
+    }
     next(err);
   }
 };
 
-exports.login = (req, res, next) => {
+exports.login = async (req, res, next) => {
   try {
     const { username, password } = req.body || {};
 
@@ -65,14 +103,31 @@ exports.login = (req, res, next) => {
       return res.status(400).json({ error: "Username and password are required" });
     }
 
-    const user = User.findByUsername(username.trim());
-    // Same message for both cases so nobody can tell which usernames exist
-    if (!user || !verifyPassword(password, user.hashed_password)) {
+    const [rows] = await db.query(
+      `SELECT users.id, users.username, users.password_hash, users.is_active, roles.role
+       FROM users JOIN roles ON roles.id = users.role_id
+       WHERE users.username = ?`,
+      [username.trim()]
+    );
+    const user = rows[0];
+
+    // Same message for every case so nobody can tell which usernames exist
+    if (!user || !user.is_active || !verifyPassword(password, user.password_hash)) {
       return res.status(401).json({ error: "Invalid username or password" });
     }
 
     const refreshToken = signRefreshToken(user);
-    User.update(user.id, { refresh_token: refreshToken, revoked_at: null });
+    await db.query(
+      "INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES (?, ?, DATE_ADD(NOW(), INTERVAL 7 DAY))",
+      [user.id, hashToken(refreshToken)]
+    );
+
+    // httpOnly: page JavaScript cannot read this cookie, which protects it from XSS
+    res.cookie(REFRESH_COOKIE, refreshToken, {
+      httpOnly: true,
+      sameSite: "strict",
+      maxAge: SEVEN_DAYS_MS,
+    });
 
     res.status(200).json({
       accessToken: signAccessToken(user),
@@ -83,9 +138,9 @@ exports.login = (req, res, next) => {
   }
 };
 
-exports.refresh = (req, res, next) => {
+exports.refresh = async (req, res, next) => {
   try {
-    const { refreshToken } = req.body || {};
+    const refreshToken = readRefreshToken(req);
     if (isMissing(refreshToken)) {
       return res.status(400).json({ error: "Refresh token is required" });
     }
@@ -101,28 +156,40 @@ exports.refresh = (req, res, next) => {
       return res.status(401).json({ error: "Not a refresh token" });
     }
 
-    const user = User.findById(payload.id);
-    if (!user || user.refresh_token !== refreshToken) {
+    const [rows] = await db.query(
+      `SELECT users.id, users.username, roles.role
+       FROM refresh_tokens
+       JOIN users ON users.id = refresh_tokens.user_id
+       JOIN roles ON roles.id = users.role_id
+       WHERE refresh_tokens.token_hash = ?
+         AND refresh_tokens.user_id = ?
+         AND refresh_tokens.revoked_at IS NULL
+         AND refresh_tokens.expires_at > NOW()
+         AND users.is_active = 1`,
+      [hashToken(refreshToken), payload.id]
+    );
+    if (rows.length === 0) {
       return res.status(401).json({ error: "Refresh token has been revoked" });
     }
 
-    res.status(200).json({ accessToken: signAccessToken(user) });
+    res.status(200).json({ accessToken: signAccessToken(rows[0]) });
   } catch (err) {
     next(err);
   }
 };
 
-exports.logout = (req, res, next) => {
+exports.logout = async (req, res, next) => {
   try {
-    const { refreshToken } = req.body || {};
+    const refreshToken = readRefreshToken(req);
     if (isMissing(refreshToken)) {
       return res.status(400).json({ error: "Refresh token is required" });
     }
 
-    const user = User.findByRefreshToken(refreshToken);
-    if (user) {
-      User.update(user.id, { refresh_token: null, revoked_at: new Date().toISOString() });
-    }
+    await db.query(
+      "UPDATE refresh_tokens SET revoked_at = NOW() WHERE token_hash = ? AND revoked_at IS NULL",
+      [hashToken(refreshToken)]
+    );
+    res.clearCookie(REFRESH_COOKIE, { httpOnly: true, sameSite: "strict" });
 
     // Always 200, so the response does not reveal whether the token was stored
     res.status(200).json({ message: "Logged out" });

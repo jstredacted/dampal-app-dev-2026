@@ -41,9 +41,10 @@ nav a:hover, nav button:hover, nav a.active { color: #222; }
 main { padding: 30px 20px; min-height: 300px; }
 main h2 { font-size: 1.6em; margin: 10px 0 30px; color: #222; }
 
-.blogs a { display: block; margin-bottom: 18px; }
+.blogs a { display: block; margin-bottom: 22px; }
 .blogs h3 { margin: 0; font-size: 1.2em; color: #222; }
 .blogs p { margin: 4px 0 0; }
+.blogs .meta { margin: 2px 0 0; }
 .blogs a:hover h3 { text-decoration: underline; }
 
 .details h2 { margin-bottom: 6px; }
@@ -79,9 +80,10 @@ textarea { min-height: 160px; resize: vertical; }
 .columns section { flex: 1 1 280px; }
 .columns h2 { margin-bottom: 0; }
 
-#message { min-height: 1.5em; color: #b00020; margin: 0 0 10px; }
-#message.ok { color: #1b7f3b; }
-[hidden] { display: none !important; }
+.message { color: #b00020; margin: 0 0 10px; }
+.message.ok { color: #1b7f3b; }
+
+:focus-visible { outline: 2px solid #222; outline-offset: 2px; }
 
 footer { text-align: center; color: #777; padding: 20px 0 40px; }
 

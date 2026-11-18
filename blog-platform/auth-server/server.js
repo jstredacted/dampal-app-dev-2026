@@ -8,9 +8,20 @@ if (!process.env.JWT_SECRET) {
   process.exit(1);
 }
 
+const db = require("./db");
 const app = require("./src/app");
 
 const PORT = process.env.AUTH_PORT || 4000;
-app.listen(PORT, "127.0.0.1", () => {
-  console.log(`Auth Server running at http://127.0.0.1:${PORT}`);
-});
+
+// Check the database first, so a stopped MySQL gives a clear message instead of 500 errors later
+db.query("SELECT 1")
+  .then(() => {
+    app.listen(PORT, "127.0.0.1", () => {
+      console.log(`Auth Server running at http://127.0.0.1:${PORT}`);
+    });
+  })
+  .catch((err) => {
+    console.error(`Cannot connect to MariaDB: ${err.message}`);
+    console.error("Start MySQL in XAMPP and run: npm run db:setup");
+    process.exit(1);
+  });
